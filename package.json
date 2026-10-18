@@ -12,5 +12,9 @@
   "dependencies": {
     "@red-cup-engineering/web-advertising-system-engineering-services-section": "workspace:*",
     "wrangler": "4.127.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/red-cup-engineering/house-ads-server-site.git"
   }
 }
