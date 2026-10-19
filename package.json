@@ -10,7 +10,7 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@red-cup-engineering/web-advertising-system-engineering-services-section": "workspace:*",
+    "@red-cup-engineering/web-advertising-system-engineering-services-section": "0.2.1",
     "wrangler": "4.127.1"
   },
   "repository": {
