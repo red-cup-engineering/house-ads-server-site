@@ -16,5 +16,10 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/red-cup-engineering/house-ads-server-site.git"
+  },
+  "license": "MIT",
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/561-group/.github/blob/main/TIPS.md"
   }
 }
