@@ -130,3 +130,83 @@ test("installed paid source refuses unqualified sponsor before campaign cost or 
     assert.deepEqual(receipts,[],"no false paid event is generated");
   }
 });
+
+
+test("installed host preserves the free KV PUT budget under first-party load, quota refusal and reset",async()=>{
+  // This is a host/selected-package receiving test. A catalog-source promise
+  // alone cannot establish that the actual installed Worker uses zero paid
+  // KV writes for ordinary, first-party acquisition traffic.
+  const support=HOUSE_CREATIVE_CATALOG.find(item=>item.id===ID);
+  assert.ok(support);
+  let clock=Date.parse("2026-10-24T23:59:00.000Z");
+  const reset=Date.parse("2026-10-25T00:00:00.000Z");
+  const activity=[],writeAttempts=[];
+  const kv={
+    async put(key){writeAttempts.push(key);if(clock<reset){
+      const error=new Error("KV PUT quota exceeded: private provider detail");
+      error.status=429;throw error;
+    }},
+  };
+  const env={AD_RECEIPTS:kv,AD_ACTIVITY:{writeDataPoint(point){activity.push(point);}}};
+  const house=createAdServerWorker({catalog:[support],nowMs:()=>clock});
+  const paths=[
+    ["/ad?slot=footer&property=play-561-group&context=games","GET",200],
+    ["/view?slot=footer&property=play-561-group&context=games&creative="+ID,"POST",202],
+    ["/click?slot=footer&property=play-561-group&context=games&creative="+ID,"GET",302],
+  ];
+  // A 64-client burst comprises 192 admitted source requests, not 192
+  // impressions, accepted customers, charged events or billed usage.
+  const burst=await Promise.all(Array.from({length:64},()=>paths).flat().map(
+    async ([path,method,status])=>{
+      const response=await house.fetch(new Request(ORIGIN+path,{method,redirect:"manual"}),env);
+      assert.equal(response.status,status,path);
+      if(method==="GET"&&path.startsWith("/click")) {
+        assert.equal(response.headers.get("location"),URL);
+        assert.equal(response.headers.get("x-561-receipt-status"),"not-applicable");
+      }
+      return response.status;
+    }));
+  assert.equal(burst.length,192);
+  assert.equal(activity.length,192,"only best-effort aggregate observations were submitted");
+  assert.equal(writeAttempts.length,0,"192 house requests must not consume any KV PUT allowance");
+  const refused=await house.fetch(new Request(
+    ORIGIN+"/click?slot=footer&property=play-561-group&creative=unissued"),env);
+  assert.equal(refused.status,404);
+  assert.equal(activity.length,192,"refused requests do not become aggregate activity");
+  assert.equal(writeAttempts.length,0);
+
+  // A real paid/source-qualified event remains different: one PUT is required
+  // to record it. Provider 429 must refuse the event, hold further attempts
+  // in this isolate, and never silently count an unrecorded paid action.
+  const sponsor={id:"quota-test-sponsor",status:"live",relationship:"sponsored",
+    title:"Qualifying supplier",body:"Test-only candidate",property:"merchant",
+    slots:["footer"],properties:["play-561-group"],allowedContexts:["games"],
+    disclosure:"Sponsored by test supplier",href:"https://supplier.example.org/offer",
+    expiresAt:"2027-03-01T12:00:00Z"};
+  const paid=createAdServerWorker({catalog:[support,sponsor],nowMs:()=>clock});
+  const paidPath="/view?slot=footer&property=play-561-group&context=games&creative="+sponsor.id;
+  const former=console.error,logs=[];
+  console.error=message=>logs.push(String(message));
+  try {
+    const first=await paid.fetch(new Request(ORIGIN+paidPath,{method:"POST"}),env);
+    assert.equal(first.status,503,"429 cannot be represented as recorded paid delivery");
+    assert.equal(writeAttempts.length,1);
+    const held=await Promise.all(Array.from({length:64},()=>
+      paid.fetch(new Request(ORIGIN+paidPath,{method:"POST"}),env)));
+    assert.ok(held.every(reply=>reply.status===503));
+    assert.equal(writeAttempts.length,1,"quota backpressure prevents 64 pointless retries");
+    assert.equal(logs.length,1,"known quota failure is not logged once per refused event");
+    assert.equal(JSON.parse(logs[0]).errorClass,"kv-write-quota-exhausted");
+    assert.doesNotMatch(logs[0],/private provider detail/u);
+    const fallback=await paid.fetch(new Request(
+      ORIGIN+"/ad?slot=footer&property=play-561-group&context=games"),env);
+    assert.equal(fallback.status,200,"house delivery survives a paid-storage hold");
+    assert.equal((await fallback.json()).creative.relationship,"house");
+    assert.equal(writeAttempts.length,1);
+    clock=reset;
+    const recovered=await paid.fetch(new Request(ORIGIN+paidPath,{method:"POST"}),env);
+    assert.equal(recovered.status,202,"paid receiving retries only after quota reset");
+    assert.equal((await recovered.json()).status,"recorded");
+    assert.equal(writeAttempts.length,2);
+  }finally{console.error=former;}
+});
