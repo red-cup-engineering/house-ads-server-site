@@ -64,11 +64,18 @@ test("the existing Worker serves real catalog, house selection and redirect", as
   assert.ok(seen.some(event => event.blobs?.[0] === "outbound-redirect"), "only aggregate server telemetry");
 });
 
-test("unsellable publisher and unadmitted creative do not redirect",async()=>{
-  const self = await site.fetch(new Request(ORIGIN+"/click?slot=footer&property=561-group-sustaining-support&creative="+ID),{});
+test("invalid publisher, self-promotion and unadmitted creative do not redirect",async()=>{
+  const invalid = await site.fetch(new Request(ORIGIN+"/click?slot=footer&property=561-group-sustaining-support&creative="+ID),{});
+  assert.equal(invalid.status,400,"publisher coordinates must begin with a letter");
+  assert.equal(invalid.headers.get("location"),null);
+  const news=HOUSE_CREATIVE_CATALOG.find(item=>item.status==="live"&&item.property==="koios-news");
+  assert.ok(news,"the original live news creative supplies a valid self-promotion control");
+  const self = await site.fetch(new Request(ORIGIN+"/click?slot=footer&property=koios-news&creative="+news.id),{});
   assert.equal(self.status,404);
+  assert.equal(self.headers.get("location"),null);
   const fabricated = await site.fetch(new Request(ORIGIN+"/click?slot=footer&property=koios-news&creative=no-such-offer"),{});
   assert.equal(fabricated.status,404);
+  assert.equal(fabricated.headers.get("location"),null);
 });
 
 
