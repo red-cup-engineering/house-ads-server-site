@@ -217,3 +217,47 @@ test("installed host preserves the free KV PUT budget under first-party load, qu
     assert.equal(writeAttempts.length,2);
   }finally{console.error=former;}
 });
+
+test("selected installed supplier carries the received ASSIST browser campaign through the original host", async () => {
+  const campaignId = "assist-public-guides-20261025";
+  const destination = "https://assist-561.briskolm35.chatgpt.site/";
+  const response = await site.fetch(new Request(ORIGIN + "/catalog"), {});
+  assert.equal(response.status, 200);
+  const catalog = (await response.json()).catalog;
+  const offer = catalog.find(creative => creative.id === campaignId);
+  assert.ok(offer, "the actual installed supplier must contain the received ASSIST creative");
+  assert.equal(offer.href, destination);
+  assert.equal(offer.status, "live");
+  assert.equal(offer.relationship, "house");
+  assert.equal(offer.expiresAt, "2026-11-25T00:00:00Z");
+  const clock = Date.parse("2026-10-25T12:00:00Z");
+  const instance = createAdServerWorker({ catalog: [offer], nowMs: () => clock });
+  for (const target of [
+    { slot: "afterArticle", property: "koios-news", context: "technology" },
+    { slot: "footer", property: "play-561-group", context: "games" },
+  ]) {
+    assert.ok(listEligibleCreatives({ catalog, ...target, now: new Date(clock) }).some(c => c.id === campaignId));
+    const activity = [], writes = [];
+    const env = { AD_ACTIVITY: { writeDataPoint: point => activity.push(point) },
+      AD_RECEIPTS: { put: async (...args) => writes.push(args) } };
+    const query = new URLSearchParams({ ...target, creative: campaignId });
+    const ad = await instance.fetch(new Request(ORIGIN + "/ad?" + query), env);
+    assert.equal(ad.status, 200);
+    assert.equal((await ad.json()).creative.id, campaignId);
+    assert.equal((await instance.fetch(new Request(ORIGIN + "/view?" + query, { method: "POST" }), env)).status, 202);
+    const redirect = await instance.fetch(new Request(ORIGIN + "/click?" + query, { redirect: "manual" }), env);
+    assert.equal(redirect.status, 302);
+    assert.equal(redirect.headers.get("location"), destination);
+    assert.equal(redirect.headers.get("x-561-receipt-status"), "not-applicable");
+    assert.deepEqual(writes, [], "ASSIST house acquisition does not consume paid KV writes");
+    assert.deepEqual(activity.map(point => point.blobs[0]), ["creative-response", "client-visible-opportunity", "outbound-redirect"]);
+    const count = activity.length;
+    const foreign = new URLSearchParams({ ...target, context: "unrelated", creative: campaignId });
+    assert.equal((await instance.fetch(new Request(ORIGIN + "/click?" + foreign), env)).status, 404);
+    assert.equal(activity.length, count, "an ineligible redirect creates no aggregate prospect");
+    const expired = createAdServerWorker({ catalog: [offer], nowMs: () => Date.parse(offer.expiresAt) });
+    assert.equal((await expired.fetch(new Request(ORIGIN + "/click?" + query), env)).status, 404);
+    assert.deepEqual(writes, []);
+    assert.equal(activity.length, count);
+  }
+});
