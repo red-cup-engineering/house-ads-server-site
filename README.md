@@ -21,8 +21,10 @@ Gig provider requirements. The campaign invites that browser journey; it
 promises no account, machine API, completed task, payment or financial action.
 
 The site imports the same supplier's original `createAdServerWorker`. Its
-existing `AD_RECEIPTS` KV namespace, `AD_ACTIVITY` aggregate dataset, custom
-`ads.561.group` route and Wrangler version are unchanged. The original six
+existing `AD_RECEIPTS` KV namespace, custom `ads.561.group` route and Wrangler
+version are unchanged. House ad, view and click requests do not write paid KV
+receipts. Aggregate activity uses the optional `AD_ACTIVITY` binding when it is
+available. The original six
 host tests remain intact, including the 192-request zero-KV house burst and
 paid quota/refusal/reset case. A seventh test receives the installed ASSIST
 catalog record through this host and checks both publisher contexts, original
@@ -42,6 +44,24 @@ catalog and actual publisher rendering separately.
 The exact source-packed `0.3.0-dev.2` candidate passes all **7/7** native host
 cases with zero skips. Wrangler **4.127.1** completed the original deployment
 command in `--dry-run` mode, emitting the Worker without uploading it or
-changing cloud resources. The existing namespace and Analytics dataset appear
-unchanged in that build's binding inventory. Source-built receiving does not
-establish that `ads.561.group` has been upgraded.
+changing cloud resources. The deployment retains the existing receipt namespace.
+
+## Optional aggregate analytics
+
+The production account rejected the `AD_ACTIVITY` binding with Cloudflare error
+`10089` because Analytics Engine is not enabled. The default Wrangler
+configuration therefore omits that optional binding. The supplier serves house
+ads with its existing `unbound` activity result and performs zero paid-receipt KV
+writes. Request logs remain enabled through Workers observability.
+
+After Analytics Engine is available in the account, add this original dataset
+binding to `wrangler.jsonc` and deploy through the same release workflow:
+
+```json
+"analytics_engine_datasets": [
+  { "binding": "AD_ACTIVITY", "dataset": "house_ads_activity" }
+]
+```
+
+The release must select the same binding configuration and receive it from the
+active Worker before using aggregate activity results.
